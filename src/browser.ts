@@ -25,7 +25,11 @@ function requirePage(): Page {
 
 export async function open_browser(headless = false): Promise<ToolResult> {
   try {
-    browser = await chromium.launch({ headless, slowMo: 50 });
+    browser = await chromium.launch({
+      headless,
+      slowMo: 50,
+      args: ['--autoplay-policy=no-user-gesture-required'],
+    });
     context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       userAgent:
@@ -45,7 +49,7 @@ export async function navigate_to_url(url: string): Promise<ToolResult> {
   try {
     const p = requirePage();
     await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await p.waitForTimeout(1500);
+    await p.waitForTimeout(2000);
     logger.success(`Navigated to ${url}`);
     return { success: true, message: `Navigated to ${url}` };
   } catch (err) {
@@ -67,6 +71,7 @@ export async function take_screenshot(label = ''): Promise<ScreenshotResult> {
 
     await p.screenshot({ path: filepath, fullPage: false });
     const base64 = fs.readFileSync(filepath).toString('base64');
+    await p.waitForTimeout(500);
 
     logger.success(`Screenshot saved → ${filename}`);
     return { success: true, message: `Screenshot saved to ${filepath}`, base64, filepath };
@@ -81,7 +86,7 @@ export async function click_on_screen(x: number, y: number): Promise<ToolResult>
   try {
     const p = requirePage();
     await p.mouse.click(x, y);
-    await p.waitForTimeout(300);
+    await p.waitForTimeout(1000);
     logger.success(`Clicked at (${x}, ${y})`);
     return { success: true, message: `Clicked at (${x}, ${y})` };
   } catch (err) {
@@ -122,7 +127,7 @@ export async function press_key(key: string): Promise<ToolResult> {
   try {
     const p = requirePage();
     await p.keyboard.press(key);
-    await p.waitForTimeout(200);
+    await p.waitForTimeout(1500);
     logger.success(`Pressed key: ${key}`);
     return { success: true, message: `Pressed key: ${key}` };
   } catch (err) {

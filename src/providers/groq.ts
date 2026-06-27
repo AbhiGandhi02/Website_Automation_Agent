@@ -3,8 +3,8 @@ import type { LLMProvider, LLMResponse, HistoryEntry, ToolCall } from '../llm';
 import { toOpenAITools } from '../tools';
 import { logger } from '../logger';
 
-// llama-3.3-70b-versatile: most reliable Groq model for tool/function calling
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
+// llama-4-scout: current Groq model with vision + tool/function calling support
+const GROQ_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
 type GroqMessage = Groq.Chat.ChatCompletionMessageParam;
 
@@ -39,15 +39,18 @@ function buildMessages(history: HistoryEntry[], systemPrompt: string): GroqMessa
       });
     }
 
-    // llama-3.3-70b-versatile is text-only — pass a note so it knows a screenshot was taken.
-    // The model uses its training knowledge of the target page to determine coordinates.
+    // Pass the actual screenshot as an image so the model can see the page
     if (entry.screenshotBase64) {
       messages.push({
         role: 'user',
-        content:
-          'Screenshot captured (1280×800px viewport). ' +
-          'Use your knowledge of the target page layout to decide coordinates for the next action.',
-      });
+        content: [
+          { type: 'text', text: 'Current browser state (1280×800px viewport):' },
+          {
+            type: 'image_url',
+            image_url: { url: `data:image/png;base64,${entry.screenshotBase64}` },
+          },
+        ],
+      } as GroqMessage);
     }
   }
 

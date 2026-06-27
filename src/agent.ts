@@ -4,24 +4,34 @@ import type { LLMProvider, LLMResponse, HistoryEntry, ToolCall, ToolResult } fro
 import { GroqProvider } from './providers/groq';
 import { GeminiProvider } from './providers/gemini';
 
-const TARGET_URL = 'https://ui.shadcn.com/docs/forms/react-hook-form';
+function buildSystemPrompt(task: string): string {
+  return `You are an autonomous web automation agent controlling a real Chromium browser via Playwright.
 
-const SYSTEM_PROMPT = `You are an autonomous web automation agent controlling a real Chromium browser via Playwright.
-
-YOUR MISSION:
-1. Open the browser
-2. Navigate to: ${TARGET_URL}
-3. Scroll down until you find the form demo — it has "Name" and "Description" input fields
-4. Click on the "Name" input field and type: "Alex Johnson"
-5. Click on the "Description" textarea and type: "This form was filled automatically by an AI-powered web automation agent built with Playwright and Google Gemini."
-6. Call task_complete once both fields are filled
+YOUR TASK: ${task}
 
 RULES:
-- Always call take_screenshot after navigating or performing any action — you must see the page to decide next steps
+- Start by calling open_browser, then navigate_to_url to the appropriate website
+- After EVERY action (navigate, click, type, scroll, key press) — call take_screenshot so you can see the result
 - The viewport is 1280×800 pixels; coordinates start from top-left (0,0)
-- If you cannot find the form, scroll down and take another screenshot
+- If something is not visible, scroll down and take another screenshot
 - If a click misses, try slightly different coordinates
-- Call task_complete ONLY after you have confirmed both fields contain text`;
+- Call task_complete ONLY after you have successfully completed the task
+
+WEB SEARCH PATTERN (use this when searching on any site):
+1. Click the search bar (usually at the top of the page)
+2. Call take_screenshot to confirm it is focused
+3. Call send_keys to type the search query
+4. Call press_key with "Enter" to submit
+5. Call take_screenshot — wait for results to fully load before clicking anything
+6. Click on the desired result
+
+VIDEO PLAYBACK PATTERN:
+1. Click a video thumbnail from the search results
+2. Call take_screenshot — wait for the video page to fully load
+3. The video player occupies the left portion of the screen. Click at the center of the video player area (approximately x=427, y=240) to start playback
+4. Call take_screenshot to confirm the video is playing (you should see a progress bar at the bottom of the player)
+5. Only call task_complete after you can see the video is actually playing`;
+}
 
 type ToolArgs = Record<string, unknown>;
 
@@ -74,12 +84,13 @@ async function executeTool(
 async function callWithFallback(
   providers: LLMProvider[],
   history: HistoryEntry[],
+  systemPrompt: string,
 ): Promise<LLMResponse> {
   let lastError: Error | undefined;
 
   for (const provider of providers) {
     try {
-      const response = await provider.complete(history, SYSTEM_PROMPT);
+      const response = await provider.complete(history, systemPrompt);
       logger.info(`Provider used: ${provider.name}`);
       return response;
     } catch (err) {
@@ -96,7 +107,7 @@ async function callWithFallback(
   throw lastError ?? new Error('All providers failed');
 }
 
-export async function runAgent(): Promise<void> {
+export async function runAgent(task: string): Promise<void> {
   const groqKey = process.env.GROQ_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY;
 
@@ -104,22 +115,23 @@ export async function runAgent(): Promise<void> {
     throw new Error('At least one of GROQ_API_KEY or GEMINI_API_KEY must be set');
   }
 
-  // Build provider list: Groq first, Gemini as fallback
   const providers: LLMProvider[] = [];
   if (groqKey) providers.push(new GroqProvider(groqKey));
   if (geminiKey) providers.push(new GeminiProvider(geminiKey));
 
   const maxIterations = parseInt(process.env.MAX_ITERATIONS ?? '25', 10);
+  const systemPrompt = buildSystemPrompt(task);
 
   logger.divider();
   logger.agent(`Providers: ${providers.map(p => p.name).join(' → ')}`);
-  logger.agent(`Max iterations: ${maxIterations} | Target: ${TARGET_URL}`);
+  logger.agent(`Max iterations: ${maxIterations}`);
+  logger.agent(`Task: ${task}`);
   logger.divider();
 
   const history: HistoryEntry[] = [
     {
       kind: 'user_init',
-      text: 'Begin the automation task. Open the browser, navigate to the target URL, find the form, and fill in both fields. Start now.',
+      text: `Begin the task now: ${task}`,
     },
   ];
 
@@ -132,7 +144,7 @@ export async function runAgent(): Promise<void> {
 
     let response: LLMResponse;
     try {
-      response = await callWithFallback(providers, history);
+      response = await callWithFallback(providers, history, systemPrompt);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`All providers failed: ${msg}`);
